@@ -58,6 +58,12 @@ button:focus-visible,input:focus-visible,textarea:focus-visible{outline:3px soli
 .fab{position:absolute;right:12px;bottom:14px;z-index:1000;width:52px;height:52px;border-radius:50%;padding:0;
   background:var(--bg);border:2px solid var(--line);font-size:22px}
 
+.me{width:26px;height:26px;position:relative}
+.me-dot{position:absolute;inset:4px;border-radius:50%;background:#0a84ff;border:3px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.4)}
+.me-arrow{position:absolute;inset:-10px;transition:transform .4s}
+.me-arrow::before{content:"";position:absolute;left:50%;top:0;transform:translateX(-50%);border-left:7px solid transparent;border-right:7px solid transparent;border-bottom:12px solid #0a84ff}
+#btnHeading{bottom:76px;font-size:11px;line-height:1.15;font-weight:700}
+@media (prefers-reduced-motion: reduce){.me-arrow{transition:none}}
 #sheet{background:var(--bg);border-top:1px solid var(--line);padding:10px 12px calc(12px + env(safe-area-inset-bottom,0px))}
 .tabs{display:flex;background:var(--btn);border-radius:12px;padding:4px;gap:4px;margin-bottom:10px}
 .tabs button{flex:1;min-height:40px;background:none;font-size:15px}
@@ -121,6 +127,7 @@ dialog h2{margin:0 0 12px;font-size:18px}
   </div>
   <div id="offBanner" hidden>ルートから外れています</div>
   <div id="busy" hidden>ルートを計算中…</div>
+  <button id="btnHeading" class="fab" hidden aria-label="地図の向きを切り替え"></button>
   <button id="btnLocate" class="fab" aria-label="現在地に移動">◎</button>
 </div>
 
@@ -181,6 +188,7 @@ dialog h2{margin:0 0 12px;font-size:18px}
 <div id="toast" role="status"></div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/leaflet-rotate@0.2.8/dist/leaflet-rotate-src.js"></script>
 <script>
 (() => {
 'use strict';
@@ -232,18 +240,25 @@ const store = {
 };
 
 /* ---------- 地図 ---------- */
-const map = L.map('map',{zoomControl:false}).setView([36.2,138.2],5);
-const gsi = L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/std/{z}/{x}/{y}.png',
-  {maxZoom:19,maxNativeZoom:18,attribution:'<a href="https://maps.gsi.go.jp/development/ichiran.html" target="_blank">国土地理院</a>'});
-const osm = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-  {maxZoom:19,attribution:'&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap</a>'});
-gsi.addTo(map);
-L.control.layers({'地理院地図':gsi,'OpenStreetMap':osm},null,{position:'topright'}).addTo(map);
+const map = L.map('map',{zoomControl:false,rotate:true,touchRotate:false,rotateControl:false,bearing:0}).setView([36.2,138.2],5);
+const GSI_ATTR='<a href="https://maps.gsi.go.jp/development/ichiran.html" target="_blank">国土地理院</a>';
+const baseLayers = {
+  'シンプル（おすすめ）': L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
+    {subdomains:'abcd',maxZoom:20,attribution:'&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions" target="_blank">CARTO</a>'}),
+  '地理院 淡色': L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/pale/{z}/{x}/{y}.png',{maxZoom:19,maxNativeZoom:18,attribution:GSI_ATTR}),
+  '地理院 標準': L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/std/{z}/{x}/{y}.png',{maxZoom:19,maxNativeZoom:18,attribution:GSI_ATTR}),
+  'OpenStreetMap': L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+    {maxZoom:19,attribution:'&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap</a>'}),
+  '航空写真': L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/seamlessphoto/{z}/{x}/{y}.jpg',{maxZoom:19,maxNativeZoom:18,attribution:GSI_ATTR})
+};
+(baseLayers[store.get('routeNavi.layer','')]||baseLayers['シンプル（おすすめ）']).addTo(map);
+L.control.layers(baseLayers,null,{position:'topright'}).addTo(map);
+map.on('baselayerchange',e=>store.set('routeNavi.layer',e.name));
 map.attributionControl.addAttribution('ルート: <a href="https://routing.openstreetmap.de/" target="_blank">FOSSGIS OSRM</a>・検索: Nominatim／国土地理院');
 const casing = L.polyline([], {color:'#fff',weight:10,opacity:.9,interactive:false}).addTo(map);
 const line = L.polyline([], {color:'#1450a0',weight:6,opacity:.95,interactive:false}).addTo(map);
 const liveLine = L.polyline([], {color:'#e8590c',weight:5,dashArray:'4 8',interactive:false}).addTo(map);
-const userDot = L.circleMarker([0,0],{radius:9,color:'#fff',weight:3,fillColor:'#0a84ff',fillOpacity:1});
+const userDot = L.marker([0,0],{icon:L.divIcon({className:'',html:'<div class="me"><div class="me-arrow" hidden></div><div class="me-dot"></div></div>',iconSize:[26,26],iconAnchor:[13,13]}),interactive:false,keyboard:false,zIndexOffset:1000});
 const accCircle = L.circle([0,0],{radius:1,color:'#0a84ff',weight:1,fillOpacity:.1,interactive:false});
 const searchMarker = L.circleMarker([0,0],{radius:11,color:'#b3261e',weight:3,fillColor:'#ffd200',fillOpacity:1});
 
@@ -476,6 +491,7 @@ function renderUI(){
   $('#searchBox').hidden = !editing;
   if(!editing) $('#searchResults').hidden=true;
   $('#hud').hidden = mode!=='nav';
+  $('#btnHeading').hidden = !(mode==='nav' && canRotate);
 
   const isPts = S.type==='points';
   $('#tabPoints').setAttribute('aria-pressed',isPts); $('#tabTrace').setAttribute('aria-pressed',!isPts);
@@ -674,6 +690,48 @@ let wakeLock=null;
 async function keepAwake(){ try{ if('wakeLock' in navigator) wakeLock=await navigator.wakeLock.request('screen'); }catch{} }
 document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='visible'&&mode==='nav') keepAwake(); });
 
+/* ---------- 地図の向き ---------- */
+const canRotate = typeof map.setBearing==='function';
+let headingUp = store.get('routeNavi.headingUp',true);
+let bsign = null;
+function calibrate(){ // プラグインの回転方向を実際に確かめる
+  const c=map.getCenter(), e=L.latLng(c.lat,c.lng+0.001);
+  for(const s of [1,-1]){
+    map.setBearing(s*-90);
+    const pc=map.latLngToContainerPoint(c), pe=map.latLngToContainerPoint(e);
+    if(pe.y<pc.y-5 && Math.abs(pe.x-pc.x)<Math.abs(pe.y-pc.y)){ bsign=s; break; }
+  }
+  if(bsign==null) bsign=1;
+  map.setBearing(0);
+}
+function setMapHeading(h){
+  if(!canRotate) return;
+  if(h!==0 && bsign==null) calibrate();
+  const b=(((bsign||1)*-h)%360+360)%360;
+  const cur=typeof map.getBearing==='function'?map.getBearing():null;
+  if(cur!=null && Math.abs(((cur-b+540)%360)-180)<0.5) return;
+  map.setBearing(b);
+}
+function applyHeading(){
+  const h=nav.heading, rot=mode==='nav'&&headingUp&&canRotate&&h!=null;
+  setMapHeading(rot?h:0);
+  const el=userDot.getElement(), arrow=el&&el.querySelector('.me-arrow');
+  if(arrow){ arrow.hidden = mode!=='nav'||h==null; arrow.style.transform=`rotate(${rot?0:h}deg)`; }
+  $('#btnHeading').textContent = headingUp?'進行方向\nが上':'北が上';
+  $('#btnHeading').style.whiteSpace='pre';
+}
+function updateHeading(p,r){
+  let h=null;
+  if(r && r.dist<25 && route.total>2){ // ルート上ならルートの向き
+    const a=Math.max(0,Math.min(nav.progress,route.total-15));
+    const p1=pointOn(route.coords,route.cum,a), p2=pointOn(route.coords,route.cum,Math.min(route.total,a+15));
+    if(hav(p1,p2)>1) h=bearing(p1,p2);
+  } else if(nav.prevPt && hav(nav.prevPt,p)>=8) h=bearing(nav.prevPt,p); // 外れたら歩いた向き
+  if(!nav.prevPt || hav(nav.prevPt,p)>=8) nav.prevPt=p;
+  if(h!=null && (nav.heading==null || Math.abs(((h-nav.heading+540)%360)-180)>4)){ nav.heading=h; applyHeading(); }
+}
+$('#btnHeading').onclick=()=>{ headingUp=!headingUp; store.set('routeNavi.headingUp',headingUp); applyHeading(); };
+
 /* ---------- 案内 ---------- */
 const nav={};
 function phrase(m,prefix,withMemo){
@@ -683,9 +741,9 @@ function phrase(m,prefix,withMemo){
 function startNav(sim){
   if(!route) return;
   mode='nav'; map.closePopup();
-  Object.assign(nav,{i:0,progress:0,init:false,offCount:0,off:false,lastOffWarn:0,follow:true,last:null,sim,simAlong:0});
+  Object.assign(nav,{i:0,progress:0,init:false,offCount:0,off:false,lastOffWarn:0,follow:true,last:null,sim,simAlong:0,prevPt:null,heading:null});
   route.mans.forEach(m=>{ m.s1=m.s2=m.done=false; });
-  renderMarkers(); renderUI();
+  renderMarkers(); renderUI(); applyHeading();
   keepAwake();
   say(`${sim?'試しに再生します。':''}案内を開始します。全長${fmtSpeak(route.total)}、徒歩およそ${fmtMin(route.total)}分です。${route.startMemo||''}`);
   if(sim){
@@ -704,6 +762,7 @@ function stopNav(){
   clearInterval(nav.timer); nav.watch=null; nav.timer=null;
   if(wakeLock){ wakeLock.release().catch(()=>{}); wakeLock=null; }
   mode='edit'; $('#offBanner').hidden=true; map.removeLayer(accCircle);
+  nav.heading=null; applyHeading();
   renderMarkers(); renderUI();
 }
 function locate(p){
@@ -721,6 +780,7 @@ function onFix(lat,lng,acc){
   userDot.setLatLng(p).addTo(map); accCircle.setLatLng(p).setRadius(acc).addTo(map);
   if(nav.follow) map.setView(p,Math.max(map.getZoom(),17),{animate:!nav.sim});
   const r=locate(p);
+  if(acc<=40) updateHeading(p,r);
   if(nav.init&&acc>80){ updateHud(); return; }
   if(r.dist<60) nav.progress=r.along;
   nav.init=true;
