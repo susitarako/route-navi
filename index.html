@@ -103,6 +103,7 @@ dialog h2{margin:0 0 12px;font-size:18px}
   background:#1b2430;color:#fff;padding:10px 16px;border-radius:10px;font-size:15px;max-width:90vw;opacity:0;pointer-events:none;transition:opacity .2s}
 #toast.show{opacity:1}
 @media (prefers-reduced-motion: reduce){#toast{transition:none}}
+#selProfile{font:inherit;font-size:16px;min-height:46px;border:0;border-radius:10px;background:var(--btn);color:var(--ink);padding:0 8px}
 #btnAI{background:linear-gradient(90deg,#1450a0,#5b3cc4);color:#fff;font-weight:700}
 dialog textarea,dialog input[type=password]{width:100%;font:inherit;font-size:16px;padding:10px;border:1px solid var(--line);
   border-radius:10px;background:var(--bg);color:var(--ink);margin-bottom:8px}
@@ -151,7 +152,10 @@ dialog a{color:var(--sign)}
       <button id="tabPoints" aria-pressed="true">地点で決める</button>
       <button id="tabTrace" aria-pressed="false">道をなぞる</button>
     </div>
-    <div class="row"><button id="btnAI">✨ AIに頼んでルートを作る</button></div>
+    <div class="row">
+      <button id="btnAI" style="flex:2">✨ AIに頼んでルートを作る</button>
+      <select id="selProfile" aria-label="移動手段"><option value="foot">🚶 徒歩</option><option value="moped">🛵 原付</option></select>
+    </div>
     <p class="info" id="info"></p>
     <div class="row">
       <button id="btnHere">現在地を出発地に</button>
@@ -232,12 +236,17 @@ dialog a{color:var(--sign)}
 const $ = s => document.querySelector(s);
 const KEY_ROUTES = 'routeNavi.routes.v1';
 const KEY_DRAFT = 'routeNavi.draft.v2';
-const WALK_MPS = 1.33;
-const SIM_SPEED = 6;
+const PROF = {
+  foot: {label:'徒歩', mps:1.33, sim:6, far:180, farMin:70, near:45, arrive:25, arriveSoon:70, off:35, pass:15, straight:350, zoom:17,
+         url:'https://routing.openstreetmap.de/routed-foot/route/v1/driving/', exclude:''},
+  moped:{label:'原付', mps:40/3.6, sim:2, far:300, farMin:130, near:100, arrive:40, arriveSoon:150, off:50, pass:25, straight:800, zoom:16,
+         url:'https://routing.openstreetmap.de/routed-car/route/v1/driving/', exclude:'motorway'}
+};
+const P = () => PROF[S.profile]||PROF.foot;
 
 /* ---------- 共通 ---------- */
 let toastTimer;
-function toast(msg){ const t=$('#toast'); t.textContent=msg; t.classList.add('show'); clearTimeout(toastTimer); toastTimer=setTimeout(()=>t.classList.remove('show'),3200); }
+function toast(msg){ const t=$('#toast'); t.textContent=msg; t.classList.add('show'); clearTimeout(toastTimer); toastTimer=setTimeout(()=>t.classList.remove('show'),Math.max(3200,msg.length*120)); }
 const rad = d => d*Math.PI/180;
 const LL = w => [w.lat,w.lng];
 function hav(a,b){ const R=6371000, dLat=rad(b[0]-a[0]), dLng=rad(b[1]-a[1]);
@@ -270,7 +279,7 @@ function simplify(pts,tol){
 }
 function fmtSpeak(d){ return d<1000 ? `${Math.max(10,Math.round(d/10)*10)}メートル` : `${(d/1000).toFixed(1)}キロ`; }
 function fmtShow(d){ return d<1000 ? `${Math.round(d/10)*10} m` : `${(d/1000).toFixed(1)} km`; }
-function fmtMin(d){ return Math.max(1,Math.round(d/WALK_MPS/60)); }
+function fmtMin(d){ return Math.max(1,Math.round(d/P().mps/60)); }
 const store = {
   get(k,def){ try{ const v=localStorage.getItem(k); return v?JSON.parse(v):def; }catch{ return def; } },
   set(k,v){ try{ localStorage.setItem(k,JSON.stringify(v)); return true; }catch{ return false; } }
@@ -306,7 +315,7 @@ function geoError(e){ toast(e && e.code===1 ? '位置情報の利用が許可さ
 
 /* ---------- 状態 ---------- */
 // type: 'points'（出発地・目的地・経由地） / 'trace'（なぞった線）
-let S = {type:'points', start:null, goal:null, vias:[], routed:true, path:[]};
+let S = {type:'points', start:null, goal:null, vias:[], routed:true, path:[], profile:'foot'};
 let confirmed = false;   // ルート決定済み
 let mode = 'edit';       // 'edit' | 'nav'
 let route = null;        // {coords,cum,total,mans,startMemo}
@@ -434,10 +443,12 @@ function turnInfo(type,mod){
 }
 async function fetchRouted(o){
   const cs=o.map(p=>`${p.lng.toFixed(6)},${p.lat.toFixed(6)}`).join(';');
-  const url=`https://routing.openstreetmap.de/routed-foot/route/v1/driving/${cs}?overview=full&geometries=geojson&steps=true`;
+  const pr=P(), base=`${pr.url}${cs}?overview=full&geometries=geojson&steps=true`;
   const ctrl=new AbortController(); const tm=setTimeout(()=>ctrl.abort(),15000);
   try{
-    const res=await fetch(url,{signal:ctrl.signal}); if(!res.ok) throw new Error(res.status);
+    let res=await fetch(base+(pr.exclude?`&exclude=${pr.exclude}`:''),{signal:ctrl.signal});
+    if(!res.ok && pr.exclude) res=await fetch(base,{signal:ctrl.signal}); // 除外指定が使えないサーバー向け
+    if(!res.ok) throw new Error(res.status);
     const j=await res.json(); if(j.code!=='Ok'||!j.routes||!j.routes.length) throw new Error(j.code);
     const rt=j.routes[0], coords=rt.geometry.coordinates.map(([x,y])=>[y,x]), turns=[];
     rt.legs.forEach(leg=>leg.steps.forEach(st=>{
@@ -518,7 +529,7 @@ async function doRoute(){
 function summary(){
   if(!route) return '';
   const turns=route.mans.filter(m=>m.text&&m.dir!=='arrive').length;
-  return `<b>${fmtShow(route.total)}</b>　徒歩 約${fmtMin(route.total)}分／曲がり角 ${turns}か所`;
+  return `<b>${fmtShow(route.total)}</b>　${P().label} 約${fmtMin(route.total)}分／曲がり角 ${turns}か所`;
 }
 function renderUI(){
   const editing = mode==='edit' && !confirmed;
@@ -537,6 +548,7 @@ function renderUI(){
   $('#btnDraw').classList.toggle('on',drawOn);
   const ph=phase();
   $('#btnHere').textContent = {start:'現在地を出発地に',goal:'現在地を目的地に',via:'現在地を経由地に'}[ph]||'';
+  $('#selProfile').value = S.profile||'foot';
   $('#btnUndo').disabled = !undoStack.length;
   $('#btnClear').disabled = isPts ? !(S.start||S.goal||S.vias.length) : !S.path.length;
   $('#btnConfirm').disabled = !route || busy;
@@ -566,6 +578,10 @@ $('#btnClear').onclick=()=>{
   if(!confirm(S.type==='points'?'出発地・目的地・経由地をすべて消しますか？':'なぞった線をすべて消しますか？')) return;
   snapshot(); if(S.type==='points'){ S.start=S.goal=null; S.vias=[]; } else S.path=[];
   currentName=''; changed();
+};
+$('#selProfile').onchange=e=>{
+  S.profile=e.target.value==='moped'?'moped':'foot'; persist(); renderUI(); recompute();
+  if(S.profile==='moped') toast('原付用：高速道路は避けますが、自動車専用のバイパスを通ることがあります。二段階右折は案内しません');
 };
 $('#chkRouted').onchange=e=>{ S.routed=e.target.checked; persist(); recompute(); };
 $('#btnHere').onclick=async()=>{
@@ -658,9 +674,10 @@ function showResult(r){
 }
 
 /* ---------- AIでルートを作る（Gemini） ---------- */
-const AI_MODEL='gemini-3.8-flash';
+const AI_MODELS=['gemini-3.8-flash','gemini-3.7-flash','gemini-3.5-flash']; // 上から順に試す
+let aiModel=null; // 会話中はうまくいったモデルを使い続ける
 const KEY_AI='routeNavi.geminiKey';
-const AI_SYSTEM=`あなたは徒歩ナビアプリのルート作成アシスタントです。利用者の日本語の指示から、出発地・経由地・目的地を決めて set_route で地図に設定します。
+const AI_SYSTEM=`あなたはナビアプリ（徒歩・原付）のルート作成アシスタントです。利用者の日本語の指示から、出発地・経由地・目的地を決めて set_route で地図に設定します。
 ルール：
 - 場所の座標は必ず search_place の結果を使う。自分で座標を作らない。
 - 「現在地」「ここから」「今いる場所」などは get_current_location を使う。
@@ -670,7 +687,10 @@ const AI_SYSTEM=`あなたは徒歩ナビアプリのルート作成アシスタ
 - 経由地は通る順番に並べる。今のルートに付け足す指示なら、今のルートの地点も含めて設定し直す。
 - 場所がそろったら set_route を1回だけ呼び、そのあと設定した内容を1〜2文の短い日本語で伝える。
 - 場所が見つからない・指示があいまいなときは set_route を呼ばず、短く質問する。
-- memo は利用者が「ここで〇〇と読み上げて」などと頼んだときだけ入れる。`;
+- memo は利用者が「ここで〇〇と読み上げて」などと頼んだときだけ入れる。
+- 「〇〇号を通って」「〇〇を避けて」のように道を指定されたら、その道沿いにある交差点・駅・施設・町名などを search_place で探し、通ってほしい道の上や近くの地点を経由地として2〜4か所置いてルートを誘導する。避けたい道から離れた地点を選ぶ。
+- 道順の計算はアプリ側が自動で行うので、道の指定は経由地で近づけることしかできない。道を指定されたときはそのことを返事で一言添える。
+- 原付・バイク・スクーターで行くと言われたら set_route の mode を "moped"、歩きなら "foot" にする。言われなければ今の設定のままにする（mode を省略）。原付のときは高速道路や自動車専用道路の近くの地点を経由地に選ばない。`;
 const POINT_SCHEMA={type:'object',properties:{
   name:{type:'string',description:'地点の名前'},
   lat:{type:'number'},lng:{type:'number'},
@@ -687,7 +707,8 @@ const AI_TOOLS=[{functionDeclarations:[
      required:['query']}},
   {name:'set_route',description:'出発地・経由地・目的地を地図に設定する',
    parameters:{type:'object',properties:{start:POINT_SCHEMA,goal:POINT_SCHEMA,
-     vias:{type:'array',items:POINT_SCHEMA,description:'通る順に並べた経由地（なければ空配列）'}},
+     vias:{type:'array',items:POINT_SCHEMA,description:'通る順に並べた経由地（なければ空配列）'},
+     mode:{type:'string',enum:['foot','moped'],description:'移動手段。徒歩なら foot、原付なら moped。指示がなければ省略'}},
      required:['start','goal']}}
 ]}];
 let aiContents=[], aiBusy=false, aiRouteSet=false, aiRef=null;
@@ -720,6 +741,7 @@ async function runTool(name,args){
     if(!st||!gl) return {error:'start と goal には検索結果の緯度経度を入れてください'};
     const vs=(Array.isArray(args.vias)?args.vias:[]).map(toPt).filter(Boolean).slice(0,10);
     snapshot(); S.type='points'; S.start=st; S.goal=gl; S.vias=vs; confirmed=false; currentName='';
+    if(args.mode==='moped'||args.mode==='foot') S.profile=args.mode;
     changed();
     setTimeout(()=>map.fitBounds(L.latLngBounds(ordered().map(LL)),{padding:[50,50],maxZoom:17}),60);
     aiRouteSet=true;
@@ -727,17 +749,35 @@ async function runTool(name,args){
   }
   return {error:'不明なツールです'};
 }
-async function callGemini(key){
-  const res=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${AI_MODEL}:generateContent`,{
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+async function callModel(key,model){
+  const res=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,{
     method:'POST',headers:{'Content-Type':'application/json','x-goog-api-key':key},
     body:JSON.stringify({systemInstruction:{parts:[{text:AI_SYSTEM}]},contents:aiContents,tools:AI_TOOLS})});
-  if(!res.ok){ let msg=''; try{ msg=(await res.json()).error?.message||''; }catch{} const e=new Error(msg); e.status=res.status; throw e; }
+  if(!res.ok){ let msg=''; try{ msg=(await res.json()).error?.message||''; }catch{} const e=new Error(msg); e.status=res.status; e.model=model; throw e; }
   return res.json();
+}
+async function callGemini(key){
+  // 会話の途中ならそのモデルだけ。最初はモデルを順に試し、混雑(5xx)は少し待って再挑戦
+  const models = aiModel ? [aiModel] : AI_MODELS;
+  let last;
+  for(const m of models){
+    for(let attempt=0;attempt<3;attempt++){
+      try{ const d=await callModel(key,m); aiModel=m; return d; }
+      catch(e){
+        last=e;
+        if(e.status>=500){ aiStatus(`混み合っています。再試行中…（${m}）`); await sleep(1500*(attempt+1)); continue; }
+        break; // 5xx以外はこのモデルをあきらめる
+      }
+    }
+    if(last && (last.status===400||last.status===401||last.status===403)) break; // キーの問題は他のモデルでも同じ
+  }
+  throw last;
 }
 function routeContext(){
   const c=map.getCenter(); aiRef={lat:c.lat,lng:c.lng};
   const f=p=>`緯度${p.lat.toFixed(5)} 経度${p.lng.toFixed(5)}`;
-  let t=`（参考情報：今表示している地図の中心は ${f(c)}。`;
+  let t=`（参考情報：今の移動手段は${P().label}。今表示している地図の中心は ${f(c)}。`;
   if(S.type==='points'&&(S.start||S.goal)){
     t+='今のルートは';
     if(S.start) t+=` 出発地=${f(S.start)}`;
@@ -773,7 +813,7 @@ async function askAI(text){
     }
     aiStatus('');
     if(aiRouteSet){
-      $('#dlgAI').close(); aiContents=[]; $('#aiLog').innerHTML='';
+      $('#dlgAI').close(); aiContents=[]; aiModel=null; $('#aiLog').innerHTML='';
       toast(reply||'ルートを設定しました。確認して「ルート決定」を押してください');
     } else aiLog('ai',reply||'うまく決められませんでした。もう少し詳しく教えてください');
   }catch(e){
@@ -782,15 +822,16 @@ async function askAI(text){
     let m='AIに接続できませんでした。電波の状況を確認してください';
     if(e.status===400||e.status===401||e.status===403) m='APIキーが正しくないか、使えない状態です。「APIキーの設定」から確認してください';
     else if(e.status===429) m='無料枠の回数の上限に達しました。しばらく待ってからもう一度送ってください';
-    else if(e.status===404) m='AIのモデルが見つかりませんでした（'+AI_MODEL+'）';
-    else if(e.status>=500) m='Gemini側で一時的なエラーが起きました。少し待ってからもう一度送ってください';
+    else if(e.status===404) m='AIのモデルが見つかりませんでした';
+    else if(e.status>=500) m='Gemini側でエラーが続いています。少し時間をおいてから送ってください';
+    if(e.status) m+=`\n［詳細］${e.model||''} ${e.status} ${String(e.message||'').slice(0,160)}`;
     aiLog('err',m);
   }finally{ aiBusy=false; $('#btnAISend').disabled=false; }
 }
 function openKeyDialog(){ $('#keyInput').value=store.get(KEY_AI,''); $('#dlgKey').showModal(); }
 $('#btnAI').onclick=()=>{ if(!store.get(KEY_AI,'')){ openKeyDialog(); return; } $('#dlgAI').showModal(); };
 $('#btnAISend').onclick=()=>{ const t=$('#aiInput').value.trim(); if(!t||aiBusy) return; $('#aiInput').value=''; askAI(t); };
-$('#btnAIReset').onclick=()=>{ if(aiBusy) return; aiContents=[]; $('#aiLog').innerHTML=''; aiStatus(''); };
+$('#btnAIReset').onclick=()=>{ if(aiBusy) return; aiContents=[]; aiModel=null; $('#aiLog').innerHTML=''; aiStatus(''); };
 $('#btnAIClose').onclick=()=>$('#dlgAI').close();
 $('#btnAIKey').onclick=()=>{ $('#dlgAI').close(); openKeyDialog(); };
 $('#btnKeySave').onclick=()=>{
@@ -806,12 +847,13 @@ function normalize(d){
   const P=w=>w&&isFinite(w.lat)&&isFinite(w.lng)?{lat:+w.lat,lng:+w.lng,memo:String(w.memo||'')}:null;
   if(Array.isArray(d.wps)){ // 旧形式
     const w=d.wps.map(P).filter(Boolean);
-    return {type:'points',start:w[0]||null,goal:w.length>1?w[w.length-1]:null,vias:w.slice(1,-1),routed:d.routed!==false,path:[]};
+    return {type:'points',start:w[0]||null,goal:w.length>1?w[w.length-1]:null,vias:w.slice(1,-1),routed:d.routed!==false,path:[],profile:'foot'};
   }
   const s=d.S||d;
   return {type:s.type==='trace'?'trace':'points',start:P(s.start),goal:P(s.goal),
     vias:(s.vias||[]).map(P).filter(Boolean),routed:s.routed!==false,
-    path:(s.path||[]).filter(p=>Array.isArray(p)&&isFinite(p[0])&&isFinite(p[1])).map(p=>[+p[0],+p[1]])};
+    path:(s.path||[]).filter(p=>Array.isArray(p)&&isFinite(p[0])&&isFinite(p[1])).map(p=>[+p[0],+p[1]]),
+    profile:s.profile==='moped'?'moped':'foot'};
 }
 function loadRoute(data,name){
   let n; try{ n=normalize(data); }catch{ n=null; }
@@ -928,13 +970,13 @@ function phrase(m,prefix,withMemo){
 function startNav(sim){
   if(!route) return;
   mode='nav'; map.closePopup();
-  Object.assign(nav,{i:0,progress:0,init:false,offCount:0,off:false,lastOffWarn:0,follow:true,last:null,sim,simAlong:0,prevPt:null,heading:null});
+  Object.assign(nav,{i:0,progress:0,init:false,offCount:0,off:false,lastOffWarn:0,follow:true,last:null,sim,simAlong:0,prevPt:null,heading:null,zoomed:false});
   route.mans.forEach(m=>{ m.s1=m.s2=m.done=false; });
   renderMarkers(); renderUI(); applyHeading();
   keepAwake();
-  say(`${sim?'試しに再生します。':''}案内を開始します。全長${fmtSpeak(route.total)}、徒歩およそ${fmtMin(route.total)}分です。${route.startMemo||''}`);
+  say(`${sim?'試しに再生します。':''}案内を開始します。全長${fmtSpeak(route.total)}、${P().label}でおよそ${fmtMin(route.total)}分です。${route.startMemo||''}`);
   if(sim){
-    nav.timer=setInterval(()=>{ nav.simAlong=Math.min(route.total,nav.simAlong+WALK_MPS*SIM_SPEED);
+    nav.timer=setInterval(()=>{ nav.simAlong=Math.min(route.total,nav.simAlong+P().mps*P().sim);
       const p=pointOn(route.coords,route.cum,nav.simAlong); onFix(p[0],p[1],5); },1000);
   } else {
     if(!navigator.geolocation){ toast('この端末では位置情報が使えません'); return; }
@@ -965,13 +1007,13 @@ function onFix(lat,lng,acc){
   if(mode!=='nav') return;
   const p=[lat,lng]; nav.last=p;
   userDot.setLatLng(p).addTo(map); accCircle.setLatLng(p).setRadius(acc).addTo(map);
-  if(nav.follow) map.setView(p,Math.max(map.getZoom(),17),{animate:!nav.sim});
+  if(nav.follow) map.setView(p,nav.zoomed?map.getZoom():P().zoom,{animate:!nav.sim}); nav.zoomed=true;
   const r=locate(p);
   if(acc<=40) updateHeading(p,r);
   if(nav.init&&acc>80){ updateHud(); return; }
-  if(r.dist<60) nav.progress=r.along;
+  if(r.dist<Math.max(60,P().off+20)) nav.progress=r.along;
   nav.init=true;
-  const thr=Math.max(35,Math.min(acc,60)), now=Date.now();
+  const thr=Math.max(P().off,Math.min(acc,70)), now=Date.now();
   if(r.dist>thr) nav.offCount++;
   else { if(nav.off) say('ルートに戻りました'); nav.off=false; nav.offCount=0; }
   if(nav.offCount>=2&&(!nav.off||now-nav.lastOffWarn>30000)){
@@ -984,19 +1026,20 @@ function onFix(lat,lng,acc){
 }
 function announce(){
   const mans=route.mans; let m=mans[nav.i];
-  while(m&&m.dir!=='arrive'&&nav.progress>m.along+15){
+  const pr=P();
+  while(m&&m.dir!=='arrive'&&nav.progress>m.along+pr.pass){
     nav.i++; m=mans[nav.i];
-    if(m){ const d=m.along-nav.progress; if(d>350) say(`しばらく道なりです。次の案内まで約${fmtSpeak(d)}です`); }
+    if(m){ const d=m.along-nav.progress; if(d>pr.straight) say(`しばらく道なりです。次の案内まで約${fmtSpeak(d)}です`); }
   }
   if(!m) return;
   const d=m.along-nav.progress;
   if(m.dir==='arrive'){
-    if(d<=25&&!m.done){ m.done=true; say(`目的地に到着しました。${m.memo?m.memo+'。':''}案内を終了します`); setTimeout(stopNav,400); toast('目的地に到着しました'); }
-    else if(d<=70&&!m.s2){ m.s2=true; say('まもなく目的地です'); }
+    if(d<=pr.arrive&&!m.done){ m.done=true; say(`目的地に到着しました。${m.memo?m.memo+'。':''}案内を終了します`); setTimeout(stopNav,400); toast('目的地に到着しました'); }
+    else if(d<=pr.arriveSoon&&!m.s2){ m.s2=true; say('まもなく目的地です'); }
     return;
   }
-  if(!m.s2&&d<=45){ m.s1=m.s2=true; say(phrase(m,'まもなく、',true)); }
-  else if(!m.s1&&d<=180&&d>70){ m.s1=true; say(phrase(m,`${fmtSpeak(d)}先、`,false)); }
+  if(!m.s2&&d<=pr.near){ m.s1=m.s2=true; say(phrase(m,'まもなく、',true)); }
+  else if(!m.s1&&d<=pr.far&&d>pr.farMin){ m.s1=true; say(phrase(m,`${fmtSpeak(d)}先、`,false)); }
 }
 function updateHud(){
   const m=route.mans[nav.i]; if(!m) return;
