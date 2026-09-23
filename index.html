@@ -243,15 +243,15 @@ const store = {
 const map = L.map('map',{zoomControl:false,rotate:true,touchRotate:false,rotateControl:false,bearing:0}).setView([36.2,138.2],5);
 const GSI_ATTR='<a href="https://maps.gsi.go.jp/development/ichiran.html" target="_blank">国土地理院</a>';
 const baseLayers = {
-  'シンプル（おすすめ）': L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
-    {subdomains:'abcd',maxZoom:20,attribution:'&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions" target="_blank">CARTO</a>'}),
-  '地理院 淡色': L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/pale/{z}/{x}/{y}.png',{maxZoom:19,maxNativeZoom:18,attribution:GSI_ATTR}),
+  '淡色（おすすめ）': L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/pale/{z}/{x}/{y}.png',{maxZoom:19,maxNativeZoom:18,attribution:GSI_ATTR}),
   '地理院 標準': L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/std/{z}/{x}/{y}.png',{maxZoom:19,maxNativeZoom:18,attribution:GSI_ATTR}),
+  'OSM 日本版': L.tileLayer('https://tile.openstreetmap.jp/styles/osm-bright-ja/{z}/{x}/{y}.png',
+    {maxZoom:19,maxNativeZoom:18,attribution:'&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap</a> / OSMFJ'}),
   'OpenStreetMap': L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',
     {maxZoom:19,attribution:'&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap</a>'}),
   '航空写真': L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/seamlessphoto/{z}/{x}/{y}.jpg',{maxZoom:19,maxNativeZoom:18,attribution:GSI_ATTR})
 };
-(baseLayers[store.get('routeNavi.layer','')]||baseLayers['シンプル（おすすめ）']).addTo(map);
+(baseLayers[store.get('routeNavi.layer','')]||baseLayers['淡色（おすすめ）']).addTo(map);
 L.control.layers(baseLayers,null,{position:'topright'}).addTo(map);
 map.on('baselayerchange',e=>store.set('routeNavi.layer',e.name));
 map.attributionControl.addAttribution('ルート: <a href="https://routing.openstreetmap.de/" target="_blank">FOSSGIS OSRM</a>・検索: Nominatim／国土地理院');
