@@ -1,4 +1,4 @@
-// 璃奈ちゃんボード用：「名探偵プリキュア！」を左から右へ流す
+// 璃奈ちゃんボード用：「名探偵プリキュア！」を右から左へ流す
 // ESP32 + WS2812B 16x16パネル（左下スタート／ジグザグ／横方向）
 // スマホでWi-Fi「RinaBoard」に接続 → ブラウザで http://192.168.4.1/ を開く
 //
@@ -52,7 +52,7 @@ bool     isOn    = true;
 uint8_t  bright  = 20;
 uint16_t speedMs = 80;            // 1列ずれるまでの時間(ms)。小さいほど速い
 uint8_t  colR = 255, colG = 105, colB = 180;
-int      offsetX = TEXT_LEN + PANEL_W - 1;
+int      offsetX = 0;
 unsigned long lastStep = 0;
 
 // 画面座標(x:左0〜15, y:上0〜15) → LED番号
@@ -185,8 +185,7 @@ void loop() {
   unsigned long now = millis();
   if (now - lastStep >= speedMs) {
     lastStep = now;
-    offsetX--;                                    // 左から右へ流れる
-    if (offsetX < 0) offsetX = TEXT_LEN + PANEL_W - 1;
+    offsetX = (offsetX + 1) % (TEXT_LEN + PANEL_W);   // 右から左へ流れる
     drawFrame();
   }
 }
