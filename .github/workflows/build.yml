@@ -1,0 +1,45 @@
+name: build-firmware
+
+on:
+  push:
+    branches: [firmware-build]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: arduino/setup-arduino-cli@v2
+
+      - name: Install ESP32 core and libraries
+        run: |
+          arduino-cli config init
+          arduino-cli config add board_manager.additional_urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
+          arduino-cli core update-index
+          arduino-cli core install esp32:esp32
+          arduino-cli lib install "Adafruit NeoPixel"
+
+      - name: Compile
+        run: arduino-cli compile --fqbn esp32:esp32:esp32 --export-binaries rina_text
+
+      - name: Collect binaries
+        run: |
+          B=rina_text/build/esp32.esp32.esp32
+          ls -l "$B"
+          mkdir -p out
+          cp "$B"/rina_text.ino.merged.bin out/rina_text.merged.bin
+          cp "$B"/rina_text.ino.bin out/rina_text.app.bin
+          ls -l out
+
+      - name: Commit binaries back to this branch
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+          git add -f out
+          git commit -m "build: firmware binaries" || exit 0
+          git push
