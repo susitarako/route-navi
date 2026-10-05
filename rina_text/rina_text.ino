@@ -11,7 +11,7 @@
 #include <Adafruit_NeoPixel.h>
 
 // ====== 設定（環境に合わせて変更） ======
-#define LED_PIN     5      // パネルのDINにつないでいるGPIO番号（今までのスケッチと同じ値にする）
+#define LED_PIN     14     // パネルのDINにつないでいるGPIO番号（D14）
 #define PANEL_W     16
 #define PANEL_H     16
 #define NUM_LEDS    (PANEL_W * PANEL_H)
